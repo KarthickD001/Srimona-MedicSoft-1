@@ -22,7 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { PlusCircle, Trash2, UserPlus, Search } from 'lucide-react';
-import { useState, useMemo, useEffect, useContext } from 'react';
+import React, { useState, useMemo, useEffect, useContext, memo, useCallback, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import {
   Select,
@@ -50,6 +50,7 @@ import 'jspdf-autotable';
 import { SettingsContext } from '@/context/settings-context';
 import { useLocalStorage } from '@/hooks/use-local-storage';
 import { useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 
 interface BillItem {
   id: number;
@@ -68,15 +69,20 @@ interface RecentSale {
   date: string;
   total: number;
   status: 'Completed' | 'Pending' | 'Draft';
+  items: BillItem[];
 }
 
 interface Medicine {
     id: number;
-    name: string;
-    batch: string;
-    expiry: string;
-    mrp: number;
+    brandName: string;
+    genericName: string;
+    strength: string;
+    form: string;
+    hsn: string;
     stock: number;
+    mrp: number;
+    expiryDate: string;
+    batchNo: string;
     gst: number;
 }
 
@@ -86,20 +92,202 @@ interface Customer {
     mobile: string;
     address: string;
     age: number | null;
+    gender: 'Male' | 'Female' | 'Other' | null;
+    prescriptions: number;
 }
 
-const availableMedicines: Medicine[] = [];
+const initialItems: BillItem[] = [{ id: Date.now(), name: '', batch: '', expiry: '', qty: 1, mrp: 0, discount: 0, gst: 0 }];
 
-const initialItems: BillItem[] = [{ id: 1, name: '', batch: '', expiry: '', qty: 1, mrp: 0, discount: 0, gst: 0 }];
+const calculateItemTotal = (item: BillItem) => {
+    const discountedPrice = item.mrp * (1 - item.discount / 100);
+    const gstAmount = discountedPrice * (item.gst / 100);
+    const total = discountedPrice + gstAmount;
+    return total * item.qty;
+};
 
-export default function BillingPage() {
+const BillTableRow = memo(function BillTableRow({ item: initialItem, index, onUpdate, onRemove, onMaybeAddNewRow, isLastRow, availableMedicines }: { item: BillItem, index: number, onUpdate: (id: number, updatedItem: BillItem) => void, onRemove: (id: number) => void, onMaybeAddNewRow: () => void, isLastRow: boolean, availableMedicines: Medicine[] }) {
+    const [item, setItem] = useState(initialItem);
+    const [medicineSearch, setMedicineSearch] = useState('');
+    const [isMedicinePopoverOpen, setIsMedicinePopoverOpen] = useState(false);
+    
+    const nameInputRef = useRef<HTMLInputElement>(null);
+    const batchInputRef = useRef<HTMLInputElement>(null);
+    const expiryInputRef = useRef<HTMLInputElement>(null);
+    const qtyInputRef = useRef<HTMLInputElement>(null);
+    const mrpInputRef = useRef<HTMLInputElement>(null);
+    const discountInputRef = useRef<HTMLInputElement>(null);
+
+    const inputRefs = [nameInputRef, batchInputRef, expiryInputRef, qtyInputRef, mrpInputRef, discountInputRef];
+
+    useEffect(() => {
+        setItem(initialItem);
+        setMedicineSearch(initialItem.name);
+    }, [initialItem]);
+    
+    const handleSelectMedicine = (medicine: Medicine) => {
+        const updatedItem: BillItem = {
+            ...item,
+            name: medicine.brandName,
+            batch: medicine.batchNo,
+            expiry: new Date(medicine.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }).replace('/', '/'),
+            mrp: medicine.mrp,
+            gst: medicine.gst,
+        };
+        setItem(updatedItem);
+        onUpdate(item.id, updatedItem);
+        setMedicineSearch(medicine.brandName);
+        setIsMedicinePopoverOpen(false);
+        batchInputRef.current?.focus();
+    };
+
+    const handleLocalChange = (field: keyof BillItem, value: any) => {
+        const updatedItem = { ...item, [field]: value };
+        setItem(updatedItem);
+        if (field === 'name') {
+            setMedicineSearch(value);
+        }
+        if (isLastRow) {
+            onMaybeAddNewRow();
+        }
+    };
+    
+    const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        handleLocalChange('name', e.target.value)
+        if(!isMedicinePopoverOpen) setIsMedicinePopoverOpen(true);
+    }
+
+    const handleBlur = () => {
+        onUpdate(item.id, item);
+    }
+    
+    const filteredMedicines = useMemo(() => {
+        if (!medicineSearch) return [];
+        return availableMedicines.filter(med =>
+            med.brandName.toLowerCase().includes(medicineSearch.toLowerCase()) ||
+            med.genericName.toLowerCase().includes(medicineSearch.toLowerCase())
+        );
+      }, [medicineSearch, availableMedicines]);
+      
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, currentRefIndex: number) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const nextRef = inputRefs[currentRefIndex + 1];
+            if (nextRef && nextRef.current) {
+                nextRef.current.focus();
+            } else {
+                 if (isLastRow) {
+                    onMaybeAddNewRow();
+                }
+            }
+        }
+    }
+
+    return (
+        <TableRow>
+            <TableCell>{index + 1}</TableCell>
+            <TableCell className="font-medium">
+                <Popover open={isMedicinePopoverOpen} onOpenChange={setIsMedicinePopoverOpen}>
+                  <PopoverTrigger asChild>
+                     <Input
+                        ref={nameInputRef}
+                        type="text"
+                        placeholder="Medicine Name"
+                        className="h-8"
+                        value={medicineSearch}
+                        onChange={handleNameChange}
+                        onBlur={handleBlur}
+                        onKeyDown={(e) => handleKeyDown(e, 0)}
+                    />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                      <div className="max-h-60 overflow-y-auto">
+                        {filteredMedicines.length > 0 ? (
+                           filteredMedicines.map((med) => (
+                             <div key={med.id} className="p-2 hover:bg-muted cursor-pointer" onClick={() => handleSelectMedicine(med)}>
+                               <p>{med.brandName}</p>
+                               <p className="text-xs text-muted-foreground">{med.genericName} | Stock: {med.stock}</p>
+                             </div>
+                           ))
+                        ) : (
+                           <p className="p-2 text-center text-sm">No medicine found.</p>
+                        )}
+                      </div>
+                  </PopoverContent>
+                </Popover>
+            </TableCell>
+            <TableCell>
+                <Input
+                    ref={batchInputRef}
+                    type="text"
+                    placeholder="Batch No."
+                    className="h-8 w-24"
+                    value={item.batch}
+                    onChange={(e) => handleLocalChange('batch', e.target.value)}
+                    onBlur={handleBlur}
+                    onKeyDown={(e) => handleKeyDown(e, 1)}
+                />
+            </TableCell>
+            <TableCell>
+                <Input
+                    ref={expiryInputRef}
+                    type="text"
+                    placeholder="MM/YY"
+                    className="h-8 w-20"
+                    value={item.expiry}
+                    onChange={(e) => handleLocalChange('expiry', e.target.value)}
+                    onBlur={handleBlur}
+                    onKeyDown={(e) => handleKeyDown(e, 2)}
+                />
+            </TableCell>
+            <TableCell>
+                <Input
+                    ref={qtyInputRef}
+                    type="number"
+                    className="h-8 w-16 text-center"
+                    value={item.qty}
+                    onChange={(e) => handleLocalChange('qty', parseInt(e.target.value) || 1)}
+                    onBlur={handleBlur}
+                    onKeyDown={(e) => handleKeyDown(e, 3)}
+                />
+            </TableCell>
+            <TableCell>
+                <Input
+                    ref={mrpInputRef}
+                    type="number"
+                    placeholder="0.00"
+                    className="h-8 w-20"
+                    value={item.mrp || ''}
+                    onChange={(e) => handleLocalChange('mrp', parseFloat(e.target.value) || 0)}
+                    onBlur={handleBlur}
+                    onKeyDown={(e) => handleKeyDown(e, 4)}
+                />
+            </TableCell>
+            <TableCell>
+                <Input
+                    ref={discountInputRef}
+                    type="number"
+                    className="h-8 w-16"
+                    value={item.discount}
+                    onChange={(e) => handleLocalChange('discount', parseFloat(e.target.value) || 0)}
+                    onBlur={handleBlur}
+                    onKeyDown={(e) => handleKeyDown(e, 5)}
+                />
+            </TableCell>
+            <TableCell>₹{calculateItemTotal(item).toFixed(2)}</TableCell>
+            <TableCell>
+                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => onRemove(item.id)}>
+                    <Trash2 className="w-4 h-4" />
+                </Button>
+            </TableCell>
+        </TableRow>
+    );
+});
+
+
+function BillingPage() {
   const [items, setItems] = useState<BillItem[]>(initialItems);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
-  const [addQty, setAddQty] = useState(1);
-  const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
-  
-  const [customers, setCustomers] = useLocalStorage<Customer[]>('customers', [{id: 1, name: 'Walk-in Customer', mobile: '9999999999', address: '', age: null}]);
+  const [medicines, setMedicines] = useLocalStorage<Medicine[]>('medicines', []);
+  const [customers, setCustomers] = useLocalStorage<Customer[]>('customers', [{id: 1, name: 'Walk-in Customer', mobile: '9999999999', address: '', age: null, gender: null, prescriptions: 0}]);
   const [recentSales, setRecentSales] = useLocalStorage<RecentSale[]>('recentSales', []);
   
   const [selectedCustomer, setSelectedCustomer] = useState<Customer>(customers[0]);
@@ -113,7 +301,7 @@ export default function BillingPage() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    // Generate a unique invoice number on component mount
+    // Generate a unique invoice number
     setInvoiceNumber(`JA-2425-${String(recentSales.length + 1).padStart(4, '0')}`);
   }, [items, recentSales.length]);
 
@@ -127,13 +315,6 @@ export default function BillingPage() {
     }
   }, [searchParams, customers]);
 
-
-  const calculateItemTotal = (item: BillItem) => {
-    const discountedPrice = item.mrp * (1 - item.discount / 100);
-    const gstAmount = discountedPrice * (item.gst / 100);
-    const total = discountedPrice + gstAmount;
-    return total * item.qty;
-  };
   
   const subtotal = useMemo(() => items.reduce((acc, item) => acc + (item.mrp * item.qty), 0), [items]);
   const totalDiscount = useMemo(() => items.reduce((acc, item) => acc + (item.mrp * item.qty * (item.discount / 100)), 0), [items]);
@@ -145,37 +326,50 @@ export default function BillingPage() {
   const finalTotal = subtotal - totalDiscount + totalGst;
 
 
-  const handleItemChange = (id: number, field: keyof BillItem, value: string | number) => {
+  const handleItemUpdate = useCallback((id: number, updatedItem: BillItem) => {
     setItems(prevItems => {
-        const newItems = prevItems.map(item => {
-            if (item.id === id) {
-                return { ...item, [field]: value };
-            }
-            return item;
-        });
-
-        const lastItem = newItems[newItems.length - 1];
-        if (lastItem.id === id && (lastItem.name || lastItem.batch || lastItem.expiry || lastItem.mrp > 0)) {
-            return [...newItems, { id: Date.now(), name: '', batch: '', expiry: '', qty: 1, mrp: 0, discount: 0, gst: 0 }];
+        const newItems = [...prevItems];
+        const index = newItems.findIndex(item => item.id === id);
+        if (index !== -1) {
+            newItems[index] = updatedItem;
         }
-        
         return newItems;
     });
-  };
+  }, []);
+
+  const addNewItem = useCallback(() => {
+    setItems(prev => [...prev, { id: Date.now(), name: '', batch: '', expiry: '', qty: 1, mrp: 0, discount: 0, gst: 0 }]);
+  }, []);
+
+  const maybeAddNewItem = useCallback(() => {
+    setItems(prev => {
+        const lastItem = prev[prev.length - 1];
+        if (prev.length > 0 && lastItem && (lastItem.name || lastItem.mrp > 0)) {
+            const lastInput = document.activeElement as HTMLInputElement;
+            const isLastRowBeingEdited = lastInput && lastInput.closest('tr') === lastInput.closest('tbody')?.lastChild;
+
+            if (isLastRowBeingEdited) {
+                const newRow = { id: Date.now(), name: '', batch: '', expiry: '', qty: 1, mrp: 0, discount: 0, gst: 0 };
+                return [...prev, newRow];
+            }
+        }
+        return prev;
+    });
+  }, []);
 
 
-  const removeItem = (id: number) => {
-    if (items.length > 1) {
-        setItems(items.filter(item => item.id !== id));
-    } else if (items.length === 1 && items[0].id === id) {
-        // Clear the only row instead of removing it
-        setItems([{ id: Date.now(), name: '', batch: '', expiry: '', qty: 1, mrp: 0, discount: 0, gst: 0 }]);
-    }
-  }
+  const removeItem = useCallback((id: number) => {
+    setItems(prev => {
+        if (prev.length > 1) {
+            return prev.filter(item => item.id !== id);
+        }
+        return [{ id: Date.now(), name: '', batch: '', expiry: '', qty: 1, mrp: 0, discount: 0, gst: 0 }];
+    });
+  }, []);
 
   
   const filteredCustomers = useMemo(() => {
-    if (!customerSearchQuery) return [];
+    if (!customerSearchQuery || customerSearchQuery.length < 2) return [];
     return customers.filter(customer =>
       customer.name.toLowerCase().includes(customerSearchQuery.toLowerCase()) ||
       customer.mobile.includes(customerSearchQuery)
@@ -188,10 +382,25 @@ export default function BillingPage() {
       setIsCustomerPopoverOpen(false);
   }
 
+  const handleOpenAddCustomerDialog = () => {
+    const isMobile = /^\d{10,12}$/.test(customerSearchQuery);
+    const isName = /^[a-zA-Z\s]+$/.test(customerSearchQuery);
+    
+    setNewCustomer({
+        name: isName ? customerSearchQuery : '',
+        mobile: isMobile ? customerSearchQuery : '',
+        address: '',
+        age: ''
+    });
+    setIsCustomerPopoverOpen(false);
+    setIsAddCustomerDialogOpen(true);
+    setCustomerSearchQuery('');
+  };
+
   const handleSaveCustomer = (e: React.FormEvent) => {
     e.preventDefault();
     if (newCustomer.name && newCustomer.mobile) {
-        const newCustomerData = { ...newCustomer, id: customers.length + 1, age: parseInt(newCustomer.age) || null };
+        const newCustomerData = { ...newCustomer, id: customers.length + 1, age: parseInt(newCustomer.age) || null, gender: null, prescriptions: 0 };
         setCustomers([...customers, newCustomerData]);
         setSelectedCustomer(newCustomerData);
         setCustomerSearchQuery('');
@@ -199,13 +408,6 @@ export default function BillingPage() {
         setIsAddCustomerDialogOpen(false);
     }
   }
-
-  const filteredMedicines = useMemo(() => {
-    if (!searchQuery) return [];
-    return availableMedicines.filter(med =>
-        med.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [searchQuery]);
   
   const getStatusVariant = (status: RecentSale['status']) => {
     switch (status) {
@@ -216,40 +418,43 @@ export default function BillingPage() {
   }
 
   const filteredRecentSales = useMemo(() => {
-    if (!recentSalesSearchQuery) return recentSales;
+    if (!recentSalesSearchQuery) return recentSales.slice().reverse();
     return recentSales.filter(sale =>
       sale.invoiceId.toLowerCase().includes(recentSalesSearchQuery.toLowerCase()) ||
       sale.customer.toLowerCase().includes(recentSalesSearchQuery.toLowerCase())
-    );
+    ).slice().reverse();
   }, [recentSalesSearchQuery, recentSales]);
   
   const handlePrint = () => {
     const doc = new jsPDF();
     
-    // Add header
+    // Add logo if available
+    if (settings.logo) {
+        doc.addImage(settings.logo, 'PNG', 14, 15, 40, 20); // Adjust position and size as needed
+    }
+
     doc.setFontSize(18);
-    doc.text(settings.storeName || 'Srimona MedSoft', 14, 22);
+    doc.text(settings.storeName || 'Srimona MedSoft', settings.logo ? 60 : 14, 22);
     doc.setFontSize(11);
-    doc.text(settings.address || '123 Pharmacy Lane, Health City, 500018', 14, 30);
+    doc.text(settings.address || '123 Pharmacy Lane, Health City, 500018', settings.logo ? 60 : 14, 30);
     
+    let contactLineY = settings.logo ? 35 : 35;
     let contactLine = '';
     if(settings.showPhoneOnInvoice && settings.phone) contactLine += `Phone: ${settings.phone}`;
     if(settings.showEmailOnInvoice && settings.email) {
         if(contactLine) contactLine += ' | ';
         contactLine += `Email: ${settings.email}`;
     }
-    if(contactLine) doc.text(contactLine, 14, 35);
+    if(contactLine) doc.text(contactLine, 14, contactLineY);
     
-    let gstinLineY = contactLine ? 40 : 35;
+    let gstinLineY = contactLine ? contactLineY + 5 : contactLineY;
     if(settings.showGstinOnInvoice && settings.gstin) doc.text(`GSTIN: ${settings.gstin}`, 14, gstinLineY);
 
-    // Bill details
     let detailsY = gstinLineY + 10;
     doc.setFontSize(12);
     doc.text(`Invoice #: ${invoiceNumber}`, 14, detailsY);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, 150, detailsY);
 
-    // Customer details
     let customerY = detailsY + 10;
     doc.text('Bill To:', 14, customerY);
     customerY += 5;
@@ -261,8 +466,6 @@ export default function BillingPage() {
         doc.text(`Age: ${selectedCustomer.age}`, 14, customerY);
     }
 
-
-    // Table
     const tableColumn = ["S.No", "Product", "Batch", "Expiry", "Qty", "MRP", "Disc (%)", "Net Amt"];
     const tableRows: any[] = [];
 
@@ -288,7 +491,6 @@ export default function BillingPage() {
     
     const finalY = (doc as any).lastAutoTable.finalY;
 
-    // Bill summary
     doc.setFontSize(11);
     doc.text(`Subtotal:`, 150, finalY + 10);
     doc.text(`₹${subtotal.toFixed(2)}`, 180, finalY + 10);
@@ -303,7 +505,6 @@ export default function BillingPage() {
     doc.text(`₹${Math.round(finalTotal).toFixed(2)}`, 180, finalY + 30);
     doc.setFont('helvetica', 'normal');
 
-    // Footer
     doc.setFontSize(9);
     let footerY = finalY + 45;
     if(settings.invoiceFooterNote) {
@@ -311,15 +512,54 @@ export default function BillingPage() {
     }
     doc.text("Pharmacist Signature:", 150, footerY);
 
-
     doc.autoPrint();
     window.open(doc.output('bloburl'), '_blank');
   };
 
+  const handleSaveAndPrint = () => {
+    // 1. Filter out empty items before saving
+    const validItems = items.filter(item => item.name && item.mrp > 0 && item.qty > 0);
+
+    if (validItems.length === 0) {
+        // You might want to show a toast message here
+        return;
+    }
+    
+    // 2. Save the sale
+    const newSale: RecentSale = {
+      invoiceId: invoiceNumber,
+      customer: selectedCustomer.name,
+      date: new Date().toLocaleDateString('en-GB'), // DD/MM/YYYY
+      total: Math.round(finalTotal),
+      status: 'Completed',
+      items: validItems,
+    };
+    const updatedSales = [...recentSales, newSale];
+    setRecentSales(updatedSales);
+    
+    // 3. Update medicine stock
+    const updatedMedicines = [...medicines];
+    validItems.forEach(item => {
+        const medIndex = updatedMedicines.findIndex(med => med.brandName === item.name && med.batchNo === item.batch);
+        if (medIndex !== -1) {
+            updatedMedicines[medIndex].stock -= item.qty;
+        }
+    });
+    setMedicines(updatedMedicines);
+
+    // 4. Print the invoice
+    handlePrint();
+
+    // 5. Reset the form
+    setItems(initialItems);
+    setSelectedCustomer(customers.find(c => c.name === 'Walk-in Customer') || customers[0]);
+    setInvoiceNumber(`JA-2425-${String(updatedSales.length + 1).padStart(4, '0')}`);
+  };
+
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-8">
+    <div className="flex flex-col gap-8">
+      <div>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
@@ -343,43 +583,44 @@ export default function BillingPage() {
                             className="pl-8"
                             value={customerSearchQuery}
                             onChange={(e) => {
-                              setCustomerSearchQuery(e.target.value);
-                              if (!isCustomerPopoverOpen) setIsCustomerPopoverOpen(true);
+                                setCustomerSearchQuery(e.target.value);
+                                if(e.target.value.length >= 2) setIsCustomerPopoverOpen(true);
+                                else setIsCustomerPopoverOpen(false);
                             }}
+                            onFocus={() => { if(customerSearchQuery) setIsCustomerPopoverOpen(true)}}
                           />
                         </div>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                         <div className="max-h-60 overflow-y-auto">
                           {filteredCustomers.length > 0 ? (
                             filteredCustomers.map((customer) => (
                               <div
                                 key={customer.id}
-                                className="flex items-center justify-between p-2 hover:bg-muted"
+                                className="flex items-center justify-between p-2 hover:bg-muted cursor-pointer"
+                                onClick={() => handleSelectCustomer(customer)}
                               >
                                 <div>
                                   <p>{customer.name}</p>
                                   <p className="text-sm text-muted-foreground">{customer.mobile}</p>
                                 </div>
-                                <Button size="sm" onClick={() => handleSelectCustomer(customer)}>Select</Button>
                               </div>
                             ))
                           ) : (
-                            <div 
-                              onClick={() => {
-                                setIsCustomerPopoverOpen(false);
-                                setIsAddCustomerDialogOpen(true);
-                              }}
-                              className="p-2 text-center text-sm cursor-pointer hover:bg-muted"
-                            >
-                                No customer found. <span className="font-semibold text-primary">Click to Add New Customer</span>
-                            </div>
+                            customerSearchQuery.length > 1 && (
+                                <div 
+                                onClick={handleOpenAddCustomerDialog}
+                                className="p-2 text-center text-sm cursor-pointer hover:bg-muted"
+                                >
+                                    No customer found. <span className="font-semibold text-primary">Click to Add New Customer</span>
+                                </div>
+                            )
                           )}
                         </div>
                       </PopoverContent>
                     </Popover>
                     <DialogTrigger asChild>
-                      <Button variant="outline">
+                      <Button variant="outline" onClick={() => setNewCustomer({name: '', mobile: '', address: '', age: ''})}>
                           <UserPlus className="h-4 w-4 mr-2" />
                           Add Customer
                       </Button>
@@ -470,75 +711,29 @@ export default function BillingPage() {
                   </TableHeader>
                   <TableBody>
                     {items.map((item, index) => (
-                        <TableRow key={item.id}>
-                          <TableCell>{index + 1}</TableCell>
-                          <TableCell className="font-medium">
-                            <Input
-                                type="text"
-                                placeholder="Medicine Name"
-                                className="h-8"
-                                value={item.name}
-                                onChange={(e) => handleItemChange(item.id, 'name', e.target.value)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                                type="text"
-                                placeholder="Batch No."
-                                className="h-8 w-24"
-                                value={item.batch}
-                                onChange={(e) => handleItemChange(item.id, 'batch', e.target.value)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                                type="text"
-                                placeholder="MM/YY"
-                                className="h-8 w-20"
-                                value={item.expiry}
-                                onChange={(e) => handleItemChange(item.id, 'expiry', e.target.value)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                                type="number"
-                                className="h-8 w-16 text-center"
-                                value={item.qty}
-                                onChange={(e) => handleItemChange(item.id, 'qty', parseInt(e.target.value) || 1)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                                type="number"
-                                placeholder="0.00"
-                                className="h-8 w-20"
-                                value={item.mrp || ''}
-                                onChange={(e) => handleItemChange(item.id, 'mrp', parseFloat(e.target.value) || 0)}
-                            />
-                          </TableCell>
-                           <TableCell>
-                            <Input 
-                                type="number" 
-                                className="h-8 w-16" 
-                                value={item.discount}
-                                onChange={(e) => handleItemChange(item.id, 'discount', parseFloat(e.target.value) || 0)}
-                            />
-                          </TableCell>
-                          <TableCell>₹{calculateItemTotal(item).toFixed(2)}</TableCell>
-                          <TableCell>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => removeItem(item.id)}>
-                              <Trash2 className="w-4 h-4"/>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
+                        <BillTableRow 
+                            key={item.id}
+                            item={item}
+                            index={index}
+                            onUpdate={handleItemUpdate}
+                            onRemove={removeItem}
+                            onMaybeAddNewRow={maybeAddNewItem}
+                            isLastRow={index === items.length - 1}
+                            availableMedicines={medicines}
+                        />
                       ))
                     }
                   </TableBody>
                 </Table>
               </div>
+               <Button onClick={addNewItem} variant="outline" size="sm" className="mt-2">
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Add Row
+              </Button>
             </CardContent>
           </Card>
-
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <Card>
             <CardHeader>
               <CardTitle>Bill Summary</CardTitle>
@@ -590,60 +785,57 @@ export default function BillingPage() {
 
             </CardContent>
             <CardFooter className="flex-col gap-2">
-              <Button className="w-full" onClick={handlePrint}>Save and Print Invoice</Button>
+              <Button className="w-full" onClick={handleSaveAndPrint}>Save and Print Invoice</Button>
               <Button variant="outline" className="w-full">Save as Draft</Button>
             </CardFooter>
           </Card>
-        </div>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-                <CardTitle>Recent Sales</CardTitle>
-                <CardDescription>A list of recently processed transactions.</CardDescription>
-            </div>
-            <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                    placeholder="Search by invoice or customer..."
-                    className="w-full rounded-lg bg-secondary pl-8 md:w-[200px] lg:w-[336px]"
-                    value={recentSalesSearchQuery}
-                    onChange={(e) => setRecentSalesSearchQuery(e.target.value)}
-                />
-            </div>
-        </CardHeader>
-        <CardContent>
-             <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Invoice ID</TableHead>
-                        <TableHead>Customer</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Total (₹)</TableHead>
-                        <TableHead>Status</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                   {filteredRecentSales.length > 0 ? (
-                    filteredRecentSales.map(sale => (
-                     <TableRow key={sale.invoiceId}>
-                        <TableCell className="font-medium">{sale.invoiceId}</TableCell>
-                        <TableCell>{sale.customer}</TableCell>
-                        <TableCell>{sale.date}</TableCell>
-                        <TableCell>{sale.total.toFixed(2)}</TableCell>
-                        <TableCell>
-                            <Badge variant={getStatusVariant(sale.status)}>{sale.status}</Badge>
-                        </TableCell>
-                     </TableRow>
-                   ))
-                   ) : (
-                    <TableRow>
-                        <TableCell colSpan={5} className="h-24 text-center">No recent sales.</TableCell>
-                    </TableRow>
-                   )}
-                </TableBody>
-             </Table>
-        </CardContent>
-      </Card>
+          
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                    <CardTitle>Recent Sales</CardTitle>
+                    <CardDescription>Recently processed transactions.</CardDescription>
+                </div>
+            </CardHeader>
+            <CardContent>
+                <div className="relative mb-4">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        placeholder="Search by invoice or customer..."
+                        className="w-full rounded-lg bg-secondary pl-8"
+                        value={recentSalesSearchQuery}
+                        onChange={(e) => setRecentSalesSearchQuery(e.target.value)}
+                    />
+                </div>
+                 <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Invoice</TableHead>
+                            <TableHead>Customer</TableHead>
+                            <TableHead>Total</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                       {filteredRecentSales.length > 0 ? (
+                        filteredRecentSales.map(sale => (
+                         <TableRow key={sale.invoiceId}>
+                            <TableCell className="font-medium">{sale.invoiceId}</TableCell>
+                            <TableCell>{sale.customer}</TableCell>
+                            <TableCell>₹{sale.total.toFixed(2)}</TableCell>
+                         </TableRow>
+                       ))
+                       ) : (
+                        <TableRow>
+                            <TableCell colSpan={3} className="h-24 text-center">No recent sales.</TableCell>
+                        </TableRow>
+                       )}
+                    </TableBody>
+                 </Table>
+            </CardContent>
+          </Card>
+      </div>
     </div>
   );
 }
+
+export default BillingPage;

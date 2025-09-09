@@ -6,7 +6,7 @@ import {
   ArrowUpRight,
   CircleUser,
   CreditCard,
-  DollarSign,
+  IndianRupee,
   Menu,
   Package2,
   Search,
@@ -40,8 +40,42 @@ import {
   ChartTooltipContent,
 } from '@/components/ui/chart';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { useLocalStorage } from '@/hooks/use-local-storage';
+import { useMemo, useState, useEffect } from 'react';
+import { subMonths, format, startOfMonth, endOfMonth, isWithinInterval, parse } from 'date-fns';
 
-const chartData: any[] = [];
+interface RecentSale {
+    invoiceId: string;
+    customer: string;
+    date: string; // DD/MM/YYYY
+    total: number;
+    status: 'Completed' | 'Pending' | 'Draft';
+    items: any[];
+}
+
+interface Customer {
+    id: number;
+    name: string;
+    mobile: string;
+    address: string;
+    age: number | null;
+    gender: 'Male' | 'Female' | 'Other' | null;
+    prescriptions: number;
+}
+  
+interface Medicine {
+    id: number;
+    brandName: string;
+    genericName: string;
+    strength: string;
+    form: string;
+    hsn: string;
+    stock: number;
+    mrp: number;
+    expiryDate: string; // YYYY-MM-DD
+    batchNo: string;
+    gst: number;
+}
 
 const chartConfig = {
   sales: {
@@ -50,15 +84,108 @@ const chartConfig = {
   },
 };
 
-const alerts: any[] = [];
-
 export default function DashboardPage() {
+    const [recentSales] = useLocalStorage<RecentSale[]>('recentSales', []);
+    const [customers] = useLocalStorage<Customer[]>('customers', []);
+    const [medicines] = useLocalStorage<Medicine[]>('medicines', []);
+    const [isClient, setIsClient] = useState(false);
+
+    useEffect(() => {
+        setIsClient(true);
+    }, []);
+
+    const lastMonthSales = useMemo(() => {
+        if (!isClient) return [];
+        const lastMonth = subMonths(new Date(), 1);
+        const start = startOfMonth(lastMonth);
+        const end = endOfMonth(lastMonth);
+        return recentSales.filter(sale => {
+            try {
+                const saleDate = parse(sale.date, 'dd/MM/yyyy', new Date());
+                return isWithinInterval(saleDate, { start, end });
+            } catch (e) {
+                return false;
+            }
+        });
+    }, [recentSales, isClient]);
+
+    const totalRevenue = useMemo(() => {
+        if (!isClient) return 0;
+        return recentSales.reduce((sum, sale) => sum + sale.total, 0);
+    }, [recentSales, isClient]);
+
+    const totalRevenueLastMonth = useMemo(() => {
+        if (!isClient) return 0;
+        return lastMonthSales.reduce((sum, sale) => sum + sale.total, 0)
+    }, [lastMonthSales, isClient]);
+    
+    const newCustomersLastMonth = useMemo(() => {
+        if (!isClient) return 0;
+        // This is a placeholder logic. In a real app, customer creation date would be stored.
+        return customers.length > 5 ? Math.floor(customers.length / 5) : 0;
+    }, [customers, isClient]);
+
+    const prescriptionsFilled = useMemo(() => {
+        if (!isClient) return 0;
+        return recentSales.reduce((acc, sale) => acc + sale.items.length, 0);
+    }, [recentSales, isClient]);
+    
+    const alerts = useMemo(() => {
+        if (!isClient) return [];
+        const today = new Date();
+        const sixtyDaysFromNow = new Date();
+        sixtyDaysFromNow.setDate(today.getDate() + 60);
+
+        return medicines.map(med => {
+            const expiryDate = new Date(med.expiryDate);
+            if (expiryDate < today) {
+                return { medicine: med.brandName, type: 'Expired', details: `Expired on ${expiryDate.toLocaleDateString()}` };
+            }
+            if (expiryDate <= sixtyDaysFromNow) {
+                 return { medicine: med.brandName, type: 'Near Expiry', details: `Expires on ${expiryDate.toLocaleDateString()}` };
+            }
+            if (med.stock > 0 && med.stock < 10) {
+                return { medicine: med.brandName, type: 'Low Stock', details: `Only ${med.stock} units left` };
+            }
+            if (med.stock === 0) {
+                 return { medicine: med.brandName, type: 'Out of Stock', details: 'No units available' };
+            }
+            return null;
+        }).filter(Boolean);
+    }, [medicines, isClient]);
+    
+    const chartData = useMemo(() => {
+        if (!isClient) return [];
+        const data: {month: string; sales: number}[] = [];
+        for (let i = 5; i >= 0; i--) {
+            const monthDate = subMonths(new Date(), i);
+            const monthName = format(monthDate, 'MMM');
+            
+            const start = startOfMonth(monthDate);
+            const end = endOfMonth(monthDate);
+
+            const monthSales = recentSales
+                .filter(sale => {
+                    try {
+                        const saleDate = parse(sale.date, 'dd/MM/yyyy', new Date());
+                        return isWithinInterval(saleDate, { start, end });
+                    } catch (e) {
+                        return false;
+                    }
+                })
+                .reduce((sum, sale) => sum + sale.total, 0);
+            
+            data.push({ month: monthName, sales: monthSales });
+        }
+        return data;
+    }, [recentSales, isClient]);
 
     const getAlertTypeClass = (type: string) => {
         switch (type) {
             case 'Low Stock': return 'text-orange-500';
             case 'Near Expiry': return 'text-yellow-500';
             case 'Expired': return 'text-red-500 font-bold';
+            case 'Out of Stock': return 'text-red-600 font-bold';
             default: return '';
         }
     };
@@ -70,12 +197,12 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <IndianRupee className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹0.00</div>
+            <div className="text-2xl font-bold">₹{isClient ? totalRevenue.toLocaleString('en-IN') : '...'}</div>
             <p className="text-xs text-muted-foreground">
-              No sales data from last month
+              {isClient ? (totalRevenueLastMonth > 0 ? `+₹${totalRevenueLastMonth.toLocaleString('en-IN')} from last month` : 'No sales data from last month') : '...'}
             </p>
           </CardContent>
         </Card>
@@ -87,9 +214,9 @@ export default function DashboardPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">+0</div>
+            <div className="text-2xl font-bold">{isClient ? `+${Math.max(0, customers.length - 1)}` : '...'}</div>
             <p className="text-xs text-muted-foreground">
-              No new customers last month
+              {isClient ? (newCustomersLastMonth > 0 ? `+${newCustomersLastMonth} since last month` : 'No new customers last month') : '...'}
             </p>
           </CardContent>
         </Card>
@@ -99,9 +226,9 @@ export default function DashboardPage() {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">+0</div>
+            <div className="text-2xl font-bold">+{isClient ? prescriptionsFilled : '...'}</div>
             <p className="text-xs text-muted-foreground">
-              No data from last month
+              Total items sold across all bills
             </p>
           </CardContent>
         </Card>
@@ -111,9 +238,9 @@ export default function DashboardPage() {
             <Bell className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
+            <div className="text-2xl font-bold">{isClient ? alerts.length : '...'}</div>
             <p className="text-xs text-muted-foreground">
-                No active alerts
+                {isClient ? (alerts.length > 0 ? 'Check inventory for details' : 'No active alerts') : '...'}
             </p>
           </CardContent>
         </Card>
@@ -127,7 +254,7 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="pl-2">
-             {chartData.length > 0 ? (
+             {isClient && chartData.some(d => d.sales > 0) ? (
                 <ChartContainer config={chartConfig} className="h-[300px] w-full">
                 <BarChart accessibilityLayer data={chartData}>
                     <CartesianGrid vertical={false} />
@@ -148,7 +275,7 @@ export default function DashboardPage() {
                 </ChartContainer>
               ) : (
                 <div className="flex h-[300px] w-full items-center justify-center text-muted-foreground">
-                  No sales data available.
+                  {isClient ? 'No sales data available.' : 'Loading sales data...'}
                 </div>
               )}
           </CardContent>
@@ -170,8 +297,8 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {alerts.length > 0 ? (
-                    alerts.map((alert, index) => (
+                {isClient && alerts.length > 0 ? (
+                    alerts.slice(0, 5).map((alert, index) => (
                         <TableRow key={index} className={getAlertTypeClass(alert.type)}>
                             <TableCell>{alert.medicine}</TableCell>
                             <TableCell>{alert.type}</TableCell>
@@ -180,7 +307,7 @@ export default function DashboardPage() {
                     ))
                 ) : (
                     <TableRow>
-                        <TableCell colSpan={3} className="h-24 text-center">No alerts</TableCell>
+                        <TableCell colSpan={3} className="h-24 text-center">{isClient ? 'No alerts' : 'Loading alerts...'}</TableCell>
                     </TableRow>
                 )}
               </TableBody>
@@ -191,3 +318,7 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
+
+    

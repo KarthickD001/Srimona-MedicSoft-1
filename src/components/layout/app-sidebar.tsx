@@ -22,6 +22,7 @@ import {
   ShoppingCart,
   Users,
   Cog,
+  FileCode,
 } from 'lucide-react';
 
 const navLinks = [
@@ -30,9 +31,9 @@ const navLinks = [
   { href: '/inventory', icon: Package, label: 'Inventory' },
   { href: '/customers', icon: Users, label: 'Customers' },
   { href: '/reports', icon: LineChart, label: 'Reports' },
+  { href: '/import-export', icon: FileCode, label: 'Import/Export' },
+  { href: '/settings', icon: Cog, label: 'Settings' },
 ];
-
-const bottomLinks = [{ href: '/settings', icon: Cog, label: 'Settings' }];
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -45,7 +46,7 @@ export function AppSidebar() {
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
                     <Pill className="h-5 w-5" />
                 </div>
-                <span className="text-lg font-semibold group-data-[collapsible=icon]:hidden">Srimona</span>
+                <span className="text-lg font-semibold group-data-[collapsible=icon]:hidden">Srimona Medsoft</span>
             </div>
         </SidebarHeader>
       <SidebarContent>
@@ -63,18 +64,6 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarContent>
       <SidebarFooter>
-        <SidebarMenu>
-          {bottomLinks.map((link) => (
-             <SidebarMenuItem key={link.href}>
-              <Link href={link.href} className="flex">
-                <SidebarMenuButton isActive={isActive(link.href)} tooltip={link.label}>
-                  <link.icon />
-                  <span>{link.label}</span>
-                </SidebarMenuButton>
-              </Link>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );

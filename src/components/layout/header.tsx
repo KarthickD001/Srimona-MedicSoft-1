@@ -34,6 +34,7 @@ import {
   ShoppingCart,
   FileText,
   Cog,
+  FileCode,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -46,14 +47,19 @@ const navLinks = [
     { href: '/inventory', icon: Package, label: 'Inventory' },
     { href: '/customers', icon: Users, label: 'Customers' },
     { href: '/reports', icon: LineChart, label: 'Reports' },
+    { href: '/import-export', icon: FileCode, label: 'Import/Export' },
+    { href: '/settings', icon: Cog, label: 'Settings' },
 ];
-
-const bottomLinks = [{ href: '/settings', icon: Cog, label: 'Settings' }];
 
 export function Header() {
   const pathname = usePathname();
 
-  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const capitalize = (s: string) => {
+    if (s.includes('-')) {
+        return s.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    }
+    return s.charAt(0).toUpperCase() + s.slice(1)
+  };
   
   const breadcrumbItems = pathname.split('/').filter(Boolean).map((part, index, arr) => {
     const href = '/' + arr.slice(0, index + 1).join('/');
@@ -92,7 +98,7 @@ export function Header() {
               <Pill className="h-5 w-5 transition-all group-hover:scale-110" />
               <span className="sr-only">Srimona MedSoft</span>
             </Link>
-            {[...navLinks, ...bottomLinks].map(({ href, icon: Icon, label }) => (
+            {navLinks.map(({ href, icon: Icon, label }) => (
               <Link
                 key={href}
                 href={href}
@@ -129,26 +135,6 @@ export function Header() {
         />
       </div>
       <ThemeToggle />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="secondary"
-            size="icon"
-            className="overflow-hidden rounded-full"
-          >
-            <CircleUser className="h-5 w-5" />
-            <span className="sr-only">Toggle user menu</span>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>My Account</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>Settings</DropdownMenuItem>
-          <DropdownMenuItem>Support</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>Logout</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </header>
   );
 }

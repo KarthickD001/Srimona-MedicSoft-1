@@ -14,6 +14,8 @@ interface Settings {
   showPhoneOnInvoice: boolean;
   showGstinOnInvoice: boolean;
   invoiceFooterNote: string;
+  invoiceTemplate: 'modern' | 'classic' | 'simple';
+  logo?: string;
 }
 
 interface SettingsContextType {
@@ -31,6 +33,8 @@ const defaultSettings: Settings = {
   showPhoneOnInvoice: true,
   showGstinOnInvoice: true,
   invoiceFooterNote: 'Medicines once sold cannot be returned unless expired/damaged.',
+  invoiceTemplate: 'modern',
+  logo: '',
 };
 
 export const SettingsContext = createContext<SettingsContextType>({

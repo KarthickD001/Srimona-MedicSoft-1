@@ -21,19 +21,34 @@ import {
     TableHeader,
     TableRow,
   } from '@/components/ui/table';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+  } from '@/components/ui/select';
 import { Badge } from "@/components/ui/badge"
-import React, { useContext, useRef } from "react"
+import React, { useContext, useState, useEffect, useRef } from "react"
 import { SettingsContext } from "@/context/settings-context"
 import { useToast } from "@/hooks/use-toast"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import Link from "next/link"
+import { ArrowRight, Upload, X, Crop } from "lucide-react"
+import Image from "next/image"
 
 const users: any[] = []
 
 export default function SettingsPage() {
     const { settings, setSettings } = useContext(SettingsContext);
     const { toast } = useToast();
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isClient, setIsClient] = useState(false);
+    const logoInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        setIsClient(true);
+    }, []);
     
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { id, value } = e.target;
@@ -41,7 +56,11 @@ export default function SettingsPage() {
     }
     
     const handleSwitchChange = (id: keyof typeof settings, checked: boolean) => {
-        setSettings(prev => ({ ...prev, [id]: checked }));
+        setSettings(prev => ({ ...prev, [id]: checked as any }));
+    }
+
+    const handleSelectChange = (id: keyof typeof settings, value: string) => {
+        setSettings(prev => ({...prev, [id]: value}));
     }
 
     const handleSaveChanges = () => {
@@ -51,95 +70,37 @@ export default function SettingsPage() {
         });
     }
 
-    const handleExportData = () => {
-        try {
-            const customersData = localStorage.getItem('customers');
-            
-            if (!customersData) {
+    const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setSettings(prev => ({...prev, logo: reader.result as string}));
                 toast({
-                    variant: 'destructive',
-                    title: "Export Failed",
-                    description: "No customer data found to export."
-                });
-                return;
-            }
-
-            const data = {
-                customers: JSON.parse(customersData)
+                    title: "Logo Updated",
+                    description: "Your new logo has been uploaded.",
+                })
             };
-
-            const jsonString = JSON.stringify(data, null, 2);
-            const blob = new Blob([jsonString], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `srimona-medsoft-customers-backup-${new Date().toISOString().split('T')[0]}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-
-            toast({
-                title: "Export Successful",
-                description: "Your customer data has been exported."
-            });
-        } catch (error) {
-            toast({
-                variant: 'destructive',
-                title: "Export Failed",
-                description: "Could not export your customer data. Please try again."
-            });
-            console.error("Export failed:", error);
+            reader.readAsDataURL(file);
         }
     };
+    
+    const handleRemoveLogo = () => {
+        setSettings(prev => ({...prev, logo: ''}));
+        toast({
+            title: "Logo Removed",
+            description: "Your logo has been removed.",
+        })
+    }
 
-    const handleImportData = () => {
-        fileInputRef.current?.click();
-    };
-
-    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const text = e.target?.result;
-                if (typeof text !== 'string') {
-                    throw new Error("File could not be read.");
-                }
-                const data = JSON.parse(text);
-
-                if (window.confirm("Are you sure you want to import this data? This will overwrite all current data.")) {
-                    localStorage.clear();
-                    
-                    Object.keys(data).forEach(key => {
-                        const value = typeof data[key] === 'string' ? data[key] : JSON.stringify(data[key]);
-                        localStorage.setItem(key, value);
-                    });
-
-                    toast({
-                        title: "Import Successful",
-                        description: "Your data has been imported. The application will now reload.",
-                    });
-                    
-                    // Reload to apply changes
-                    setTimeout(() => window.location.reload(), 2000);
-                }
-            } catch (error) {
-                 toast({
-                    variant: 'destructive',
-                    title: "Import Failed",
-                    description: "The selected file is not valid. Please choose a valid backup file.",
-                });
-                console.error("Import failed:", error);
-            }
-        };
-        reader.readAsText(file);
-    };
+    if (!isClient) {
+        return null; // Or a loading skeleton
+    }
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-medium">Settings</h1>
+        <h3 className="text-lg font-medium">Settings</h3>
         <p className="text-sm text-muted-foreground">
           Manage your pharmacy's settings and preferences.
         </p>
@@ -191,6 +152,64 @@ export default function SettingsPage() {
                     <CardDescription>Customize the look and feel of your printed invoices.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="logo">Company Logo</Label>
+                        <div className="flex items-center gap-4">
+                            {settings.logo ? (
+                                <div className="relative h-20 w-20 border rounded-md p-1">
+                                    <Image src={settings.logo} alt="Company Logo" fill style={{ objectFit: 'contain' }} />
+                                    <Button
+                                        variant="destructive"
+                                        size="icon"
+                                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full"
+                                        onClick={handleRemoveLogo}
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            ) : (
+                                <div className="h-20 w-20 border rounded-md flex items-center justify-center bg-muted">
+                                    <span className="text-xs text-muted-foreground">No Logo</span>
+                                </div>
+                            )}
+                            <div className="flex flex-col gap-2">
+                                <Button variant="outline" onClick={() => logoInputRef.current?.click()}>
+                                    <Upload className="mr-2 h-4 w-4" />
+                                    Upload Logo
+                                </Button>
+                                <Button variant="outline" disabled={!settings.logo}>
+                                    <Crop className="mr-2 h-4 w-4" />
+                                    Fix Ratio
+                                </Button>
+                            </div>
+                            <input
+                                type="file"
+                                ref={logoInputRef}
+                                className="hidden"
+                                accept="image/png, image/jpeg"
+                                onChange={handleLogoUpload}
+                            />
+                        </div>
+                        <p className="text-xs text-muted-foreground">Upload a PNG or JPG file. Recommended size: 200x100 pixels.</p>
+                    </div>
+                    <Separator />
+                    <div className="space-y-2">
+                        <Label htmlFor="invoiceTemplate">Invoice Design</Label>
+                         <Select value={settings.invoiceTemplate} onValueChange={(value) => handleSelectChange('invoiceTemplate', value)}>
+                            <SelectTrigger id="invoiceTemplate">
+                                <SelectValue placeholder="Select a template" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="modern">Modern</SelectItem>
+                                <SelectItem value="classic">Classic</SelectItem>
+                                <SelectItem value="simple">Simple</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                            Choose the design template for your printed invoices.
+                        </p>
+                    </div>
+                     <Separator />
                     <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
                         <div className="space-y-0.5">
                             <Label>Show Phone Number</Label>
@@ -225,22 +244,18 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent>
                    <div className="space-y-4">
-                     <div>
-                        <Label>Local Data Backup</Label>
-                        <p className="text-sm text-muted-foreground">
-                            Export all your application data into a single file for backup or to transfer to another computer.
-                        </p>
-                     </div>
-                     <div className="flex gap-2">
-                        <Button onClick={handleExportData}>Export Customer Data</Button>
-                        <Button variant="outline" onClick={handleImportData}>Import Data</Button>
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            className="hidden"
-                            accept=".json"
-                            onChange={handleFileChange}
-                        />
+                     <div className="flex items-center justify-between rounded-lg border p-4">
+                        <div>
+                            <Label>Import/Export Utility</Label>
+                            <p className="text-sm text-muted-foreground">
+                                Use the dedicated utility to export backups or import data.
+                            </p>
+                        </div>
+                        <Button asChild>
+                            <Link href="/import-export">
+                                Go to Import/Export <ArrowRight className="ml-2 h-4 w-4" />
+                            </Link>
+                        </Button>
                      </div>
                    </div>
                 </CardContent>

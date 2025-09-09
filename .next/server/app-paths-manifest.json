@@ -1,0 +1,11 @@
+{
+  "/(app)/billing/page": "app/(app)/billing/page.js",
+  "/(app)/customers/page": "app/(app)/customers/page.js",
+  "/(app)/dashboard/page": "app/(app)/dashboard/page.js",
+  "/(app)/import-export/page": "app/(app)/import-export/page.js",
+  "/(app)/inventory/page": "app/(app)/inventory/page.js",
+  "/(app)/reports/page": "app/(app)/reports/page.js",
+  "/(app)/settings/page": "app/(app)/settings/page.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/page": "app/page.js"
+}

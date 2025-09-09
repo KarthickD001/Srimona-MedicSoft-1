@@ -24,20 +24,94 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useLocalStorage } from '@/hooks/use-local-storage';
+import { useMemo } from 'react';
+import { subMonths, format, startOfMonth, endOfMonth, isWithinInterval, parse } from 'date-fns';
 
-const salesData: any[] = [];
+interface BillItem {
+  id: number;
+  name: string;
+  batch: string;
+  expiry: string;
+  qty: number;
+  mrp: number;
+  discount: number;
+  gst: number;
+}
+
+interface RecentSale {
+  invoiceId: string;
+  customer: string;
+  date: string; // DD/MM/YYYY
+  total: number;
+  status: 'Completed' | 'Pending' | 'Draft';
+  items: BillItem[];
+}
+
 const salesChartConfig = { sales: { label: 'Sales', color: 'hsl(var(--chart-1))' } };
-
-const profitData: any[] = [];
 const profitChartConfig = {
   revenue: { label: 'Revenue', color: 'hsl(var(--chart-1))' },
   expenses: { label: 'Expenses', color: 'hsl(var(--chart-2))' },
 };
-
-const topSellingData: any[] = [];
 const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
 
 export default function ReportsPage() {
+  const [recentSales] = useLocalStorage<RecentSale[]>('recentSales', []);
+
+  const salesData = useMemo(() => {
+    const data: {month: string; sales: number}[] = [];
+    for (let i = 5; i >= 0; i--) {
+        const monthDate = subMonths(new Date(), i);
+        const monthName = format(monthDate, 'MMM');
+        
+        const start = startOfMonth(monthDate);
+        const end = endOfMonth(monthDate);
+
+        const monthSales = recentSales
+            .filter(sale => {
+                try {
+                    const saleDate = parse(sale.date, 'dd/MM/yyyy', new Date());
+                    return isWithinInterval(saleDate, { start, end });
+                } catch (e) {
+                    return false;
+                }
+            })
+            .reduce((sum, sale) => sum + sale.total, 0);
+        
+        data.push({ month: monthName, sales: monthSales });
+    }
+    return data;
+  }, [recentSales]);
+
+  const profitData = useMemo(() => {
+      // Assuming cost is 70% of revenue for demonstration
+      return salesData.slice(-3).map(d => ({
+          month: d.month,
+          revenue: d.sales,
+          expenses: d.sales * 0.7,
+      }));
+  }, [salesData]);
+
+  const topSellingData = useMemo(() => {
+    const medicineSales: { [key: string]: { unitsSold: number, totalRevenue: number } } = {};
+
+    recentSales.forEach(sale => {
+        sale.items.forEach(item => {
+            if (!medicineSales[item.name]) {
+                medicineSales[item.name] = { unitsSold: 0, totalRevenue: 0 };
+            }
+            medicineSales[item.name].unitsSold += item.qty;
+            medicineSales[item.name].totalRevenue += item.qty * item.mrp * (1 - item.discount / 100);
+        });
+    });
+    
+    return Object.entries(medicineSales)
+        .map(([name, data]) => ({ name, ...data }))
+        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+        .slice(0, 10); // Top 10
+  }, [recentSales]);
+
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -56,9 +130,9 @@ export default function ReportsPage() {
             <CardDescription>A summary of sales over the past 6 months.</CardDescription>
           </CardHeader>
           <CardContent>
-            {salesData.length > 0 ? (
+            {salesData.some(d => d.sales > 0) ? (
                 <ChartContainer config={salesChartConfig} className="h-[250px] w-full">
-                    <BarChart data={salesData}>
+                    <BarChart data={salesData} margin={{ top: 20, right: 20, bottom: 5, left: 0 }}>
                         <CartesianGrid vertical={false} />
                         <XAxis dataKey="month" tickLine={false} axisLine={false} />
                         <YAxis tickFormatter={(value) => `₹${Number(value) / 1000}k`} />
@@ -79,9 +153,9 @@ export default function ReportsPage() {
             <CardDescription>Revenue vs Expenses for the last 3 months.</CardDescription>
           </CardHeader>
           <CardContent>
-             {profitData.length > 0 ? (
+             {profitData.some(d => d.revenue > 0) ? (
                 <ChartContainer config={profitChartConfig} className="h-[250px] w-full">
-                    <BarChart data={profitData}>
+                    <BarChart data={profitData} margin={{ top: 20, right: 20, bottom: 5, left: 0 }}>
                         <CartesianGrid vertical={false} />
                         <XAxis dataKey="month" tickLine={false} axisLine={false} />
                         <YAxis tickFormatter={(value) => `₹${Number(value) / 1000}k`} />
@@ -119,13 +193,13 @@ export default function ReportsPage() {
                     <TableRow key={item.name}>
                         <TableCell className='font-medium'>{item.name}</TableCell>
                         <TableCell>{item.unitsSold.toLocaleString('en-IN')}</TableCell>
-                        <TableCell>{item.totalRevenue.toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}</TableCell>
+                        <TableCell>₹{item.totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                     </TableRow>
                 ))
               ) : (
                 <TableRow>
                     <TableCell colSpan={3} className="h-24 text-center">
-                    No data available.
+                    No sales data available to calculate top selling products.
                     </TableCell>
                 </TableRow>
               )}
